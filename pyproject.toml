@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tesla-power-share"
+version = "0.1.0"
+description = "Tesla Power Share — plan how your Tesla powers your home in an outage or event (V2L/V2H discharge planner) with OpenAI-compatible AI endpoints, a pluggable LLM backend, and a deterministic offline fallback"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Raphael Malikian", email = "rtmalikian@gmail.com" }]
+keywords = ["tesla", "fleet-api", "openai-compatible", "llm", "ai", "v2l", "v2h", "powershare", "home-backup", "outage", "ev", "model-3", "model-y", "cybertruck"]
+dependencies = [
+    "requests>=2.31",
+    "python-dotenv>=1.0",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Home Automation",
+]
+
+[project.scripts]
+tpshare = "tesla_power_share.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/rtmalikian/tesla-power-share"
+Issues = "https://github.com/rtmalikian/tesla-power-share/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

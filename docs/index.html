@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tesla Power Share — Live Demo (POC): How Long Can Your Tesla Power Your Home?</title>
+<meta name="description" content="Interactive proof-of-concept demo of tesla-power-share: plan a storm outage with a pretend Tesla — usable energy, powered vs shed loads, runtime, and the reserve floor the car never goes below.">
+<style>
+  :root { --bg:#0b0e13; --panel:#141922; --line:#232c3a; --text:#e8edf4; --muted:#93a1b5; --red:#e82127; --green:#37d67a; --amber:#f5b942; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:860px; margin:0 auto; padding:24px 16px 64px; }
+  header { text-align:center; padding:28px 0 8px; }
+  h1 { font-size:2rem; margin:0 0 8px; }
+  h1 .red { color:var(--red); }
+  .tagline { color:var(--muted); margin:0 0 16px; }
+  .badge { display:inline-block; background:#2a1a1a; border:1px solid #5a2a2a; color:#ffb3b3; padding:6px 12px; border-radius:999px; font-size:.85rem; }
+  .badge a { color:#ffd7d7; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; margin-top:18px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .grid{grid-template-columns:1fr} }
+  label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:4px; }
+  select, input[type=number] { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:#0f141c; color:var(--text); font-size:1rem; }
+  input[type=range] { width:100%; }
+  .val { color:var(--text); font-weight:600; }
+  .loads { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px; }
+  .loads label { color:var(--text); font-size:.95rem; }
+  .loads input { margin-right:8px; }
+  .result { font-size:1.15rem; line-height:1.6; }
+  .result b { color:var(--green); }
+  .warn { color:var(--amber); }
+  .timeline { font-family:ui-monospace,Menlo,monospace; font-size:.9rem; line-height:1.7; white-space:pre-wrap; background:#0f141c; border:1px solid var(--line); border-radius:10px; padding:14px; margin-top:14px; }
+  .foot { color:var(--muted); font-size:.85rem; margin-top:18px; text-align:center; }
+  .foot a { color:#9db8ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Tesla <span class="red">Power Share</span></h1>
+    <p class="tagline">How long can your Tesla power your home in an outage?</p>
+    <span class="badge">● DEMO DATA — pretend cars, no real car connected · <a href="https://github.com/rtmalikian/tesla-power-share">Get the free app on GitHub</a></span>
+  </header>
+
+  <div class="card">
+    <div class="grid">
+      <div>
+        <label for="car">Your car</label>
+        <select id="car">
+          <option value="75|82">Model Y — 75 kWh, 82% battery</option>
+          <option value="57|47">Model 3 — 57 kWh, 47% battery</option>
+          <option value="95|68">Model S — 95 kWh, 68% battery</option>
+          <option value="123|90">Cybertruck — 123 kWh, 90% battery</option>
+        </select>
+      </div>
+      <div>
+        <label for="hours">Outage length: <span class="val" id="hoursVal">6 hours</span></label>
+        <input type="range" id="hours" min="1" max="24" value="6">
+      </div>
+      <div>
+        <label for="soc">Battery now: <span class="val" id="socVal">82%</span></label>
+        <input type="range" id="soc" min="5" max="100" value="82">
+      </div>
+      <div>
+        <label for="reserve">Reserve floor (never go below): <span class="val" id="reserveVal">20%</span></label>
+        <input type="range" id="reserve" min="0" max="80" value="20">
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <label>Home loads (uncheck to shed one)</label>
+      <div class="loads" id="loads"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="result" id="result"></div>
+    <div class="timeline" id="timeline"></div>
+  </div>
+
+  <p class="foot">Same math as the real app (<code>power.py</code>): usable = (battery − reserve) × pack × 0.92 efficiency; essentials always powered first. Tesla exposes no discharge API today — this demo previews the product described in <a href="https://github.com/rtmalikian/tesla-power-share/blob/main/API_PROPOSAL.md">API_PROPOSAL.md</a>. MIT, free forever.</p>
+</div>
+<script>
+const LOADS = [
+  {name:"Fridge", watts:150, essential:true},
+  {name:"Wi-Fi + router", watts:30, essential:true},
+  {name:"Lights", watts:200, essential:true},
+  {name:"Phone chargers", watts:40, essential:true},
+  {name:"Washer / dryer", watts:2500, essential:false, shed:0},
+  {name:"Water heater", watts:2000, essential:false, shed:1},
+  {name:"Heating / cooling", watts:1500, essential:false, shed:2},
+];
+const loadsEl = document.getElementById("loads");
+LOADS.forEach((l, i) => {
+  const lab = document.createElement("label");
+  const cb = document.createElement("input");
+  cb.type = "checkbox"; cb.checked = true; cb.dataset.i = i;
+  cb.addEventListener("change", update);
+  lab.appendChild(cb);
+  lab.appendChild(document.createTextNode(` ${l.name} — ${l.watts} W${l.essential ? " (essential)" : ""}`));
+  loadsEl.appendChild(lab);
+});
+function fmt(n){ return n.toFixed(1); }
+function update(){
+  const [pack, _] = document.getElementById("car").value.split("|").map(Number);
+  const soc = +document.getElementById("soc").value;
+  const reserve = +document.getElementById("reserve").value;
+  const hours = +document.getElementById("hours").value;
+  document.getElementById("socVal").textContent = soc + "%";
+  document.getElementById("reserveVal").textContent = reserve + "%";
+  document.getElementById("hoursVal").textContent = hours + (hours === 1 ? " hour" : " hours");
+  const checked = [...loadsEl.querySelectorAll("input")].map((cb, i) => cb.checked ? LOADS[i] : null).filter(Boolean);
+  // Essentials first; shed flexible loads (lowest shed order first) over the 7.6 kW cap.
+  const cap = 7600;
+  let powered = checked.filter(l => l.essential);
+  let total = powered.reduce((s, l) => s + l.watts, 0);
+  let shed = [];
+  checked.filter(l => !l.essential).sort((a, b) => a.shed - b.shed).forEach(l => {
+    if (total + l.watts <= cap) { powered.push(l); total += l.watts; } else shed.push(l);
+  });
+  const usable = Math.max(0, soc - reserve) / 100 * pack * 0.92;
+  const runtime = total > 0 ? usable * 1000 / total : Infinity;
+  const res = document.getElementById("result");
+  if (usable <= 0) {
+    res.innerHTML = `<span class="warn">Battery (${soc}%) is at or below the ${reserve}% reserve floor — nothing to discharge. Charge the car first, or lower the reserve floor.</span>`;
+  } else {
+    let html = `Your car can power <b>${powered.map(l => l.name).join(", ") || "nothing"}</b> (${total} W) for about <b>${fmt(runtime)} hours</b>, keeping <b>${reserve}%</b> in reserve (<b>${fmt(usable)} kWh</b> usable).`;
+    if (runtime < hours) html += ` <span class="warn">That covers ${fmt(runtime)} of the ${hours} hours you asked for — ${fmt(hours - runtime)} hours short.</span>`;
+    else html += ` That covers all ${hours} hours, with ${fmt(runtime - hours)} hours to spare.`;
+    if (shed.length) html += ` <span class="warn">Shed to fit the 7.6 kW cap: ${shed.map(l => l.name).join(", ")}.</span>`;
+    res.innerHTML = html;
+  }
+  // Hour-by-hour timeline, never below the floor.
+  let tl = "", socNow = soc, left = usable, h = 0;
+  while (h < hours && left > 0.001 && total > 0) {
+    const draw = Math.min(total / 1000, left);
+    left -= draw;
+    socNow = reserve + left / (pack * 0.92) * 100;
+    h++;
+    tl += `Hour ${h}: home draws ${draw.toFixed(2)} kWh — car at ${Math.round(socNow)}% (floor ${reserve}%)\n`;
+  }
+  if (h >= hours) tl += `Outage covered: all ${hours} hours, car ends at ${Math.round(socNow)}% — still above the floor.`;
+  else if (usable > 0) tl += `Home ran out of usable energy after ${h} hour(s); car held at its ${reserve}% floor.`;
+  document.getElementById("timeline").textContent = tl;
+}
+["car","soc","reserve","hours"].forEach(id => document.getElementById(id).addEventListener("input", update));
+update();
+</script>
+</body>
+</html>
